@@ -1,0 +1,75 @@
+name: Workers
+run-name: ${{ inputs.tag }}
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Opaque job id (r + 24 hex)
+        required: true
+        type: string
+      shards:
+        description: Number of shards (1-20)
+        required: true
+        default: '1'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: workers-${{ inputs.tag }}
+defaults:
+  run:
+    shell: bash
+jobs:
+  matrix:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      shards: ${{ steps.m.outputs.shards }}
+    steps:
+      - id: m
+        env:
+          COUNT: ${{ inputs.shards }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          n = int(os.environ['COUNT'])
+          assert 1 <= n <= 20 and re.fullmatch(r'r[0-9a-f]{24}', os.environ['TAG'])
+          open(os.environ['GITHUB_OUTPUT'], 'a').write('shards=' + json.dumps(list(range(n))) + '\n')
+          PY
+  worker:
+    needs: matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.matrix.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install tooling
+        run: |
+          python -m pip install -q cryptography==42.0.8 uv >/dev/null 2>&1
+          uv tool install cambc==4.0.0 >/dev/null 2>&1
+      - name: Run sealed shard
+        env:
+          BOX_KEY: ${{ secrets.BOX_KEY }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          SHARD: ${{ matrix.shard }}
+        run: python -B worker.py --repo "$REPO" --tag "$TAG" --shard "$SHARD" --out "$RUNNER_TEMP/sw" >/dev/null 2>&1
+      - name: Upload sealed result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: res-${{ inputs.tag }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/sw/export/
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 3
