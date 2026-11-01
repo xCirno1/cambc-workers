@@ -45,7 +45,7 @@ def bundle(args, tmp):
             if (Path(src) / f).exists():
                 shutil.copy(Path(src) / f, job / 'bots' / name / f)
     for d in ('sdk', 'cmake'):
-        shutil.copytree(root / d, job / d)
+        shutil.copytree(root / d, job / d, ignore=lambda dr, names: [n for n in names if os.path.islink(os.path.join(dr, n))])
     shutil.copy(root / 'cambc.toml', job / 'cambc.toml')
     (job / 'maps').mkdir()
     games = []
