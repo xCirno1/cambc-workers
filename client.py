@@ -74,7 +74,7 @@ def dispatch(repo, key, arc, shards, tmp, out):
         gh('workflow', 'run', 'workers.yml', '--repo', repo, '-f', f'tag={tag}', '-f', f'shards={shards}')
         rid = None
         for _ in range(30):
-            time.sleep(4)
+            time.sleep(2)
             runs = json.loads(gh('run', 'list', '--repo', repo, '--workflow', 'workers.yml',
                                  '--json', 'databaseId,displayTitle', '-L', '40').stdout)
             rid = next((r['databaseId'] for r in runs if r['displayTitle'] == tag), None)
@@ -83,7 +83,7 @@ def dispatch(repo, key, arc, shards, tmp, out):
         if not rid:
             raise RuntimeError('workflow run not found')
         while json.loads(gh('run', 'view', str(rid), '--repo', repo, '--json', 'status').stdout)['status'] != 'completed':
-            time.sleep(10)
+            time.sleep(5)
         dl = tmp / 'dl'
         gh('run', 'download', str(rid), '--repo', repo, '--dir', str(dl))
     finally:
