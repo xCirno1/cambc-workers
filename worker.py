@@ -59,24 +59,23 @@ def main():
         log = work / 'exec.log'
         results = []
         rc = 0
-        for bot in {spec['a'], spec['b']}:
+        for bot in sorted({g[k] for g in spec['games'] for k in ('a', 'b')}):
             rc |= run(['cambc', 'build', f'bots/{bot}', '--release'], job, env, log)
         if rc == 0:
-            games = [g for i, g in enumerate(spec['games']) if i % spec['shards'] == a.shard]
+            games = [(i, g) for i, g in enumerate(spec['games']) if i % spec['shards'] == a.shard]
             (job / 'res').mkdir()
-            rows = []
-            for i, g in enumerate(games):
-                x, y = (spec['a'], spec['b']) if not g['swap'] else (spec['b'], spec['a'])
-                rows.append(f'"bots/{x}" "bots/{y}" "{g["map"]}" "res/g{i}.repl26a" --statistics "res/g{i}.json" --json')
+            rows = [f'"bots/{g["a"]}" "bots/{g["b"]}" "{g["map"]}" "res/g{i}.repl26a" '
+                    f'--statistics "res/g{i}.json" --json' for i, g in games]
             (job / 'matches.txt').write_text('\n'.join(rows) + '\n')
             cmd = ['cambc', 'run-batch', 'matches.txt', '--jobs', str(os.cpu_count() or 2), '--release', '--color', 'never']
             if spec.get('rounds'):
                 cmd += ['--rounds', str(spec['rounds'])]
+            if spec.get('timeout'):
+                cmd += ['--timeout', str(spec['timeout'])]
             run(cmd, job, env, log)
-            for i, g in enumerate(games):
+            for i, g in games:
                 p = job / 'res' / f'g{i}.json'
-                results.append({'map': g['map'], 'swap': g['swap'],
-                                'stats': json.loads(p.read_text()) if p.exists() else None})
+                results.append({'idx': i, 'stats': json.loads(p.read_text()) if p.exists() else None})
             if spec.get('replays'):
                 shutil.make_archive(str(work / 'replays'), 'gztar', job / 'res')
                 seal(work / 'replays.tar.gz', export / 'replays.box', key)
