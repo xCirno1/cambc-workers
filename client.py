@@ -39,10 +39,24 @@ def no_links(dr, names):
     return [n for n in names if os.path.islink(os.path.join(dr, n))]
 
 
+def prebuilt(src):
+    """The bot's release wasm when it is newer than every source and build file, else None."""
+    w = Path(src) / '.cambc' / 'build-release' / 'bot.wasm'
+    if not w.exists():
+        return None
+    srcs = [p for p in (Path(src) / 'src').rglob('*') if p.is_file()]
+    srcs += [Path(src) / f for f in ('CMakeLists.txt', 'cambc.toml') if (Path(src) / f).exists()]
+    return w if all(p.stat().st_mtime <= w.stat().st_mtime for p in srcs) else None
+
+
 def pack(root, bots, games, extra, tmp):
     """bots: {name: bot dir}; games: [{a, b, map: path, ...}]. Returns the tarball of the job directory."""
     job = tmp / 'job'
     for name, src in bots.items():
+        if prebuilt(src):  # the release wasm bcp already built: the runner skips a 30-70 s compile
+            (job / 'bots' / name).mkdir(parents=True)
+            shutil.copy(prebuilt(src), job / 'bots' / name / 'bot.wasm')
+            continue
         shutil.copytree(Path(src) / 'src', job / 'bots' / name / 'src', ignore=no_links)
         for f in ('CMakeLists.txt', 'cambc.toml'):
             if (Path(src) / f).exists():

@@ -5,6 +5,7 @@ Sealed: bot sources, maps, build output, game logs, results.
 The game subprocess gets an allowlisted env (no BOX_KEY, no GH_TOKEN).
 """
 import argparse, base64, json, os, re, shutil, subprocess, sys, tarfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -59,20 +60,40 @@ def main():
         log = work / 'exec.log'
         results = []
         rc = 0
+        wasm = {}
         for bot in sorted({g[k] for g in spec['games'] for k in ('a', 'b')}):
-            rc |= run(['cambc', 'build', f'bots/{bot}', '--release'], job, env, log)
+            pre = job / 'bots' / bot / 'bot.wasm'  # built by the owner: no compile here
+            if not pre.exists():
+                rc |= run(['cambc', 'build', f'bots/{bot}', '--release'], job, env, log)
+                pre = job / 'bots' / bot / '.cambc' / 'build-release' / 'bot.wasm'
+            wasm[bot] = pre
         if rc == 0:
             games = [(i, g) for i, g in enumerate(spec['games']) if i % spec['shards'] == a.shard]
             (job / 'res').mkdir()
-            rows = [f'"bots/{g["a"]}" "bots/{g["b"]}" "{g["map"]}" "res/g{i}.repl26a" '
-                    f'--statistics "res/g{i}.json" --json' for i, g in games]
-            (job / 'matches.txt').write_text('\n'.join(rows) + '\n')
-            cmd = ['cambc', 'run-batch', 'matches.txt', '--jobs', str(os.cpu_count() or 2), '--release', '--color', 'never']
-            if spec.get('rounds'):
-                cmd += ['--rounds', str(spec['rounds'])]
-            if spec.get('timeout'):
-                cmd += ['--timeout', str(spec['timeout'])]
-            run(cmd, job, env, log)
+
+            def play(ig):
+                i, g = ig
+                od = work / f'o{i}'
+                cmd = ['cambc', 'run', str(wasm[g['a']]), str(wasm[g['b']]), '--map', str(job / g['map']),
+                       '--release', '--statistics', str(job / 'res' / f'g{i}.json'), '--json', '-o', str(od)]
+                if spec.get('rounds'):
+                    cmd += ['--rounds', str(spec['rounds'])]
+                try:
+                    with open(work / f'o{i}.log', 'wb') as f:
+                        subprocess.run(cmd, cwd=job, env=env, stdout=f, stderr=f, timeout=int(spec.get('timeout') or 600))
+                except subprocess.TimeoutExpired:
+                    pass
+                reps = sorted(od.glob('*.repl26a')) if od.exists() else []
+                if reps:
+                    shutil.move(str(reps[-1]), job / 'res' / f'g{i}.repl26a')
+
+            with ThreadPoolExecutor(os.cpu_count() or 2) as ex:
+                list(ex.map(play, games))
+            with open(log, 'ab') as f:
+                for i, _ in games:
+                    lp = work / f'o{i}.log'
+                    if lp.exists():
+                        f.write(lp.read_bytes())
             for i, g in games:
                 p = job / 'res' / f'g{i}.json'
                 results.append({'idx': i, 'stats': json.loads(p.read_text()) if p.exists() else None})
