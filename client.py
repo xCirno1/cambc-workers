@@ -7,7 +7,7 @@
 A/B are bot names as in tools/arena.py (bot, bot@REF, starter-cpp ...), resolved in --root.
 The key lives only in ~/.config/cambc-workers/key and in the GitHub secret.
 """
-import argparse, base64, glob, json, os, secrets, shlex, shutil, subprocess, sys, tarfile, tempfile, time
+import argparse, base64, glob, gzip, json, os, secrets, shlex, shutil, subprocess, sys, tarfile, tempfile, time
 from collections import defaultdict
 from pathlib import Path
 
@@ -109,7 +109,10 @@ def dispatch(repo, key, arc, shards, tmp, out):
         if rc['status'] != 'ok':
             continue
         unseal(d / 'results.box', tmp / 'r.json', key)
-        for r in json.loads((tmp / 'r.json').read_text()):
+        raw = (tmp / 'r.json').read_bytes()
+        if raw[:2] == b'\x1f\x8b':  # gzip: newer workers compress the ~370 KB per-game statistics
+            raw = gzip.decompress(raw)
+        for r in json.loads(raw):
             if r['stats']:
                 stats[r['idx']] = r['stats']
         for nm in ('log', 'replays'):

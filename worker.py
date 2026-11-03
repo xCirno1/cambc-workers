@@ -4,7 +4,7 @@ Public: this file, opaque tag/shard, ciphertext, a generic "ok/failed" status.
 Sealed: bot sources, maps, build output, game logs, results.
 The game subprocess gets an allowlisted env (no BOX_KEY, no GH_TOKEN).
 """
-import argparse, base64, json, os, re, shutil, subprocess, sys, tarfile
+import argparse, base64, gzip, json, os, re, shutil, subprocess, sys, tarfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -100,7 +100,7 @@ def main():
             if spec.get('replays'):
                 shutil.make_archive(str(work / 'replays'), 'gztar', job / 'res')
                 seal(work / 'replays.tar.gz', export / 'replays.box', key)
-        (work / 'results.json').write_text(json.dumps(results))
+        (work / 'results.json').write_bytes(gzip.compress(json.dumps(results).encode(), 6))  # ~10x smaller download
         seal(work / 'results.json', export / 'results.box', key)
         if log.exists():
             seal(log, export / 'log.box', key)
